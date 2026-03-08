@@ -64,6 +64,7 @@ MODEL_NODE_1B = ("gpt-4o-mini", "openai")
 MODEL_NODE_2  = ("gpt-4o-mini", "openai")
 MODEL_NODE_3  = ("gpt-5", "openai")
 MODEL_NODE_4  = ("gemini-2.5-flash", "gemini")
+MODEL_NODE_5  = ("gpt-4o", "openai")
 
 # ---------------------------------------------------------------------
 # LLM Helper using LangChain integrations for automatic token tracking
@@ -118,6 +119,7 @@ class TutorState(TypedDict):
     practice_2: Annotated[str, operator.add]
     resources_3: Annotated[str, operator.add]
     actions_4: Annotated[str, operator.add]
+    feedback_5: Annotated[str, operator.add]
 
 # ---------------------------------------------------------------------
 # Node Functions
@@ -355,6 +357,52 @@ Day 2: ...
     actions = call_llm(provider, model, system_prompt, user_prompt)
     return {"actions_4": actions}
 
+
+def node_5_feedback(state: TutorState) -> dict:
+    model, provider = MODEL_NODE_5
+    system_prompt = """You are Node 5 – Teacher Feedback & Growth Coach.
+Your job is to provide unbiased, constructive feedback to the teacher based on the class transcript.
+
+Guidelines:
+- Be respectful, polite, and encouraging at all times
+- Praise positive qualities and effective teaching methods
+- Point out areas for improvement in a gentle, constructive manner
+- Provide specific, actionable suggestions for enhancement
+- Focus on teaching effectiveness, clarity, engagement, and student understanding
+- Use supportive language that motivates improvement
+
+Structure your feedback to:
+1. Highlight strengths and positive qualities
+2. Gently identify areas for growth (if any)
+3. Provide specific, actionable suggestions
+4. End with encouragement and support
+"""
+    user_prompt = f"""
+Transcript:
+\"\"\"{state['transcript']}\"\"\"
+
+Please provide constructive feedback for the teacher in this format:
+
+# Teacher Feedback & Growth Opportunities
+
+## Strengths & Positive Qualities
+- [List specific strengths observed in the teaching]
+- [Praise effective methods, clear explanations, engagement techniques, etc.]
+
+## Areas for Growth (Presented Politely)
+- [Gently mention any areas that could be enhanced]
+- [Frame as opportunities rather than criticisms]
+
+## Specific Suggestions for Improvement
+- [Provide actionable, specific recommendations]
+- [Include examples of how to implement suggestions]
+
+## Encouragement & Support
+[2-4 lines of genuine encouragement, acknowledging the teacher's efforts and potential for growth]
+"""
+    feedback = call_llm(provider, model, system_prompt, user_prompt)
+    return {"feedback_5": feedback}
+
 # ---------------------------------------------------------------------
 # Combined Output Assembler
 # ---------------------------------------------------------------------
@@ -364,6 +412,7 @@ def combine_tutor_outputs(state: TutorState) -> Tuple[str, Dict]:
     practice = state.get("practice_2", "").strip()
     resources = state.get("resources_3", "").strip()
     actions = state.get("actions_4", "").strip()
+    feedback = state.get("feedback_5", "").strip()
 
     combined_md = (
         "# Class Tutor – Combined Output\n\n"
@@ -376,7 +425,9 @@ def combine_tutor_outputs(state: TutorState) -> Tuple[str, Dict]:
         "## 3 – Real-life Applications & Resources\n\n"
         f"{resources}\n\n"
         "## 4 – Actions & Feedback\n\n"
-        f"{actions}\n"
+        f"{actions}\n\n"
+        "## 5 – Teacher Feedback\n\n"
+        f"{feedback}\n"
     )
 
     combined_json = {
@@ -385,6 +436,7 @@ def combine_tutor_outputs(state: TutorState) -> Tuple[str, Dict]:
         "practice_2": practice,
         "resources_3": resources,
         "actions_4": actions,
+        "feedback_5": feedback,
         "combined_text": combined_md,
     }
     return combined_md, combined_json
@@ -400,6 +452,7 @@ def build_tutor_graph():
     graph.add_node("node_2_practice", node_2_practice)
     graph.add_node("node_3_resources", node_3_resources)
     graph.add_node("node_4_actions", node_4_actions)
+    graph.add_node("node_5_feedback", node_5_feedback)
 
     # Entry point
     graph.set_entry_point("node_1a_notes")
@@ -413,11 +466,15 @@ def build_tutor_graph():
     graph.add_edge("node_1a_notes", "node_2_practice")
     graph.add_edge("node_1a_notes", "node_4_actions")
     graph.add_edge("node_1b_misconceptions", "node_4_actions")
+    
+    # Node 5 feedback runs directly from transcript (parallel to node_1a)
+    graph.add_edge("node_1a_notes", "node_5_feedback")
 
     # Ending
     graph.add_edge("node_2_practice", END)
     graph.add_edge("node_3_resources", END)
     graph.add_edge("node_4_actions", END)
+    graph.add_edge("node_5_feedback", END)
 
     return graph.compile()
 # ---------------------------------------------------------------------

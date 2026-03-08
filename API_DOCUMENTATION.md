@@ -1,98 +1,194 @@
-# Class Recording API Documentation
+# API Documentation - Class Recording API
 
-FastAPI-based service for processing class audio recordings and generating comprehensive study materials.
+Complete API reference for the Class Recording processing service.
 
-## Features
+## Base URL
 
-- ✅ **Audio Transcription**: Converts audio/video to text using Whisper
-- ✅ **AI-Powered Study Materials**: Generates notes, misconceptions, practice questions, and resources
-- ✅ **Multi-Model Support**: Uses both OpenAI (GPT-4, GPT-5) and Gemini models
-- ✅ **Async Job Processing**: Long-running pipeline with job_id tracking
-- ✅ **SQLite Database**: Persistent storage of all recordings
-- ✅ **RESTful API**: Easy integration with any client
-
-## Installation
-
-```bash
-pip install -r requirements.txt
+```
+http://localhost:8000
 ```
 
-## Starting the Server
+## Authentication
 
-```bash
-# Development mode with auto-reload
-uvicorn api:app --reload --host 0.0.0.0 --port 8000
+Currently, the API does not require authentication. For production deployment, implement API key authentication or OAuth2.
 
-# Or run directly
-python api.py
+## Content Types
+
+- **Request**: `multipart/form-data` (for file uploads), `application/json`
+- **Response**: `application/json`, `text/plain` (for markdown endpoints)
+
+## Rate Limiting
+
+No rate limiting is currently implemented. Recommended for production: 100 requests per minute per IP.
+
+---
+
+## Endpoints Overview
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/` | API information and available endpoints |
+| POST | `/process` | Upload and process audio file |
+| GET | `/status/{job_id}` | Check job processing status |
+| GET | `/result/{job_id}/markdown` | Get result as markdown |
+| GET | `/recordings` | List all recordings with filters |
+| GET | `/recordings/{record_id}/markdown` | Get recording by ID as markdown |
+| GET | `/recordings/markdown` | Get recording by filters as markdown |
+| DELETE | `/recordings/{record_id}` | Delete recording by ID or filters |
+| DELETE | `/recordings` | Delete all recordings |
+| GET | `/audit-logs` | View audit logs with filters |
+
+---
+
+## 1. Root Endpoint
+
+### GET `/`
+
+Get API information and available endpoints.
+
+**Request:**
+```http
+GET / HTTP/1.1
+Host: localhost:8000
 ```
 
-Server will be available at: `http://localhost:8000`
-
-## API Endpoints
-
-### 1. Root Endpoint
+**Response:**
+```json
+{
+  "message": "Class Recording API",
+  "version": "1.0.0",
+  "endpoints": {
+    "POST /process": "Upload and process audio file",
+    "GET /status/{job_id}": "Check job status",
+    "GET /result/{job_id}/markdown": "Get processing result in markdown",
+    "GET /recordings": "List all recordings with optional filters",
+    "GET /recordings/{record_id}/markdown": "Get recording markdown with optional filters",
+    "DELETE /recordings/{record_id}": "Delete a recording with optional filters",
+    "DELETE /recordings": "Delete all recordings"
+  }
+}
 ```
-GET /
-```
-Returns API information and available endpoints.
 
-### 2. Process Audio File
-```
-POST /process
+**Status Codes:**
+- `200 OK`: Success
+
+---
+
+## 2. Process Audio File
+
+### POST `/process`
+
+Upload and process an audio file through the complete pipeline.
+
+**Request:**
+```http
+POST /process HTTP/1.1
+Host: localhost:8000
+Content-Type: multipart/form-data
+
+--boundary
+Content-Disposition: form-data; name="audio_file"; filename="lecture.mp3"
+Content-Type: audio/mpeg
+
+[binary audio data]
+--boundary
+Content-Disposition: form-data; name="school_name"
+
+Springfield High School
+--boundary
+Content-Disposition: form-data; name="class_name"
+
+10th Grade
+--boundary
+Content-Disposition: form-data; name="subject"
+
+Physics
+--boundary
+Content-Disposition: form-data; name="section"
+
+A
+--boundary
+Content-Disposition: form-data; name="recording_subject"
+
+Quantum Mechanics
+--boundary--
 ```
 
-Upload and process an audio file.
+**Parameters:**
 
-**Request (multipart/form-data):**
-- `audio_file` (file, required): Audio file to process
-- `class` (string, required): Class name
-- `subject` (string, required): Subject name
-- `section` (string, optional): Section
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| audio_file | file | Yes | Audio/video file to process (mp3, wav, m4a, etc.) |
+| school_name | string | Yes | Name of the school |
+| class_name | string | Yes | Class/Grade (e.g., "10th Grade", "12th") |
+| subject | string | No | Subject name (e.g., "Physics", "Mathematics") |
+| section | string | No | Section (e.g., "A", "B") |
+| recording_subject | string | No | Specific topic of the recording |
 
 **Response:**
 ```json
 {
   "job_id": "123e4567-e89b-12d3-a456-426614174000",
   "status": "pending",
-  "message": "Job created successfully. Record ID: 1"
+  "message": "Job created successfully. Record ID: a1b2c3d4-e5f6-7890-abcd-ef1234567890"
 }
 ```
 
-**Example using curl:**
+**Status Codes:**
+- `200 OK`: Job created successfully
+- `400 Bad Request`: Invalid parameters or file format
+- `500 Internal Server Error`: Server error during processing
+
+**Example (cURL):**
 ```bash
 curl -X POST "http://localhost:8000/process" \
-  -F "audio_file=@/path/to/audio.mp3" \
-  -F "class=Mathematics" \
-  -F "subject=Calculus" \
-  -F "section=A"
+  -F "audio_file=@lecture.mp3" \
+  -F "school_name=Springfield High School" \
+  -F "class_name=10th Grade" \
+  -F "subject=Physics" \
+  -F "section=A" \
+  -F "recording_subject=Quantum Mechanics"
 ```
 
-**Example using Python:**
+**Example (Python):**
 ```python
 import requests
 
 url = "http://localhost:8000/process"
-files = {"audio_file": open("audio.mp3", "rb")}
+files = {"audio_file": open("lecture.mp3", "rb")}
 data = {
-    "class": "Mathematics",
-    "subject": "Calculus",
-    "section": "A"  # optional
+    "school_name": "Springfield High School",
+    "class_name": "10th Grade",
+    "subject": "Physics",
+    "section": "A",
+    "recording_subject": "Quantum Mechanics"
 }
 
 response = requests.post(url, files=files, data=data)
-job_id = response.json()["job_id"]
-print(f"Job ID: {job_id}")
+print(response.json())
 ```
 
-### 3. Check Job Status
-```
-GET /status/{job_id}
-```
+---
+
+## 3. Check Job Status
+
+### GET `/status/{job_id}`
 
 Check the current status of a processing job.
 
-**Response:**
+**Request:**
+```http
+GET /status/123e4567-e89b-12d3-a456-426614174000 HTTP/1.1
+Host: localhost:8000
+```
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| job_id | string | UUID of the job |
+
+**Response (Processing):**
 ```json
 {
   "job_id": "123e4567-e89b-12d3-a456-426614174000",
@@ -102,128 +198,579 @@ Check the current status of a processing job.
 }
 ```
 
-**Possible statuses:**
-- `pending`: Job is queued
-- `processing`: Job is currently being processed
-- `completed`: Job finished successfully
-- `failed`: Job encountered an error
-
-**Example:**
-```bash
-curl "http://localhost:8000/status/123e4567-e89b-12d3-a456-426614174000"
-```
-
-### 4. Get Job Result
-```
-GET /result/{job_id}
-```
-
-Get the processed result (combined markdown).
-
-**Response (completed):**
+**Response (Completed):**
 ```json
 {
   "job_id": "123e4567-e89b-12d3-a456-426614174000",
   "status": "completed",
-  "combined_md": "# Class Tutor – Combined Output\n\n..."
+  "progress": "Processing complete",
+  "error": null
 }
 ```
 
-**Example:**
+**Response (Failed):**
+```json
+{
+  "job_id": "123e4567-e89b-12d3-a456-426614174000",
+  "status": "failed",
+  "progress": null,
+  "error": "Error message here"
+}
+```
+
+**Status Values:**
+- `pending`: Job is queued
+- `processing`: Job is currently being processed
+- `completed`: Job finished successfully
+- `failed`: Job encountered an error
+- `not_found`: Job ID doesn't exist
+
+**Status Codes:**
+- `200 OK`: Success
+- `404 Not Found`: Job ID not found
+
+**Example (cURL):**
 ```bash
-curl "http://localhost:8000/result/123e4567-e89b-12d3-a456-426614174000"
+curl "http://localhost:8000/status/123e4567-e89b-12d3-a456-426614174000"
 ```
 
-### 5. Get Result as Markdown
-```
-GET /result/{job_id}/markdown
+**Example (Python):**
+```python
+import requests
+
+job_id = "123e4567-e89b-12d3-a456-426614174000"
+response = requests.get(f"http://localhost:8000/status/{job_id}")
+print(response.json())
 ```
 
-Get the result as plain text markdown (useful for direct download).
+---
 
-**Example:**
+## 4. Get Result as Markdown
+
+### GET `/result/{job_id}/markdown`
+
+Get the processed result as plain text markdown.
+
+**Request:**
+```http
+GET /result/123e4567-e89b-12d3-a456-426614174000/markdown HTTP/1.1
+Host: localhost:8000
+```
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| job_id | string | UUID of the job |
+
+**Response:**
+```markdown
+# Class Tutor – Combined Output
+
+## 1A – Structured Class Notes
+
+[Generated notes content...]
+
+## 1B – Likely Misconceptions
+
+[Misconceptions content...]
+
+## 2 – Practice & Challenges
+
+[Practice questions content...]
+
+## 3 – Real-life Applications & Resources
+
+[Resources content...]
+
+## 4 – Actions & Feedback
+
+[Study plan content...]
+
+## 5 – Teacher Feedback
+
+[Teacher feedback content...]
+```
+
+**Status Codes:**
+- `200 OK`: Success
+- `400 Bad Request`: Job not completed yet
+- `404 Not Found`: Job or result not found
+
+**Example (cURL):**
 ```bash
-curl "http://localhost:8000/result/123e4567-e89b-12d3-a456-426614174000/markdown" -o result.md
+curl "http://localhost:8000/result/123e4567-e89b-12d3-a456-426614174000/markdown" \
+  -o study_materials.md
 ```
 
-### 6. List All Recordings
-```
-GET /recordings?limit=100&offset=0
+**Example (Python):**
+```python
+import requests
+
+job_id = "123e4567-e89b-12d3-a456-426614174000"
+response = requests.get(f"http://localhost:8000/result/{job_id}/markdown")
+
+with open("study_materials.md", "w", encoding="utf-8") as f:
+    f.write(response.text)
 ```
 
-Get a paginated list of all recordings.
+---
+
+## 5. List All Recordings
+
+### GET `/recordings`
+
+Get a paginated list of all recordings with optional filters.
+
+**Request:**
+```http
+GET /recordings?limit=10&offset=0&school_name=Springfield%20High%20School&class=10th%20Grade HTTP/1.1
+Host: localhost:8000
+```
 
 **Query Parameters:**
-- `limit` (int, default: 100): Maximum records to return
-- `offset` (int, default: 0): Number of records to skip
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| limit | integer | 100 | Maximum number of records to return |
+| offset | integer | 0 | Number of records to skip |
+| school_name | string | - | Filter by school name |
+| class | string | - | Filter by class name |
+| section | string | - | Filter by section |
+| subject | string | - | Filter by subject |
+| recording_subject | string | - | Filter by recording subject |
+| date | string | - | Filter by date (YYYY-MM-DD) |
 
 **Response:**
 ```json
 {
   "recordings": [
     {
-      "id": 1,
-      "date": "2025-11-21",
-      "class": "Mathematics",
+      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "date": "2026-03-07",
+      "school_name": "Springfield High School",
+      "class": "10th Grade",
       "section": "A",
-      "subject": "Calculus",
+      "subject": "Physics",
+      "recording_subject": "Quantum Mechanics",
       "audio_filename": "123e4567-e89b-12d3-a456-426614174000.mp3",
       "job_id": "123e4567-e89b-12d3-a456-426614174000",
-      "created_at": "2025-11-21 17:45:00"
+      "created_at": "2026-03-07T17:45:00"
     }
   ],
   "total": 1,
-  "limit": 100,
+  "limit": 10,
   "offset": 0
 }
 ```
 
-### 7. Get Specific Recording
-```
-GET /recordings/{record_id}
-```
+**Status Codes:**
+- `200 OK`: Success
 
-Get details of a specific recording by database ID.
+**Example (cURL):**
+```bash
+# Get all recordings
+curl "http://localhost:8000/recordings"
 
-## Database Schema
+# Filter by school and class
+curl "http://localhost:8000/recordings?school_name=Springfield%20High%20School&class=10th%20Grade"
 
-```sql
-CREATE TABLE recordings (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    date TEXT NOT NULL,
-    class TEXT NOT NULL,
-    section TEXT,
-    subject TEXT NOT NULL,
-    audio_filename TEXT NOT NULL,
-    combined_md TEXT,
-    job_id TEXT UNIQUE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-)
+# Pagination
+curl "http://localhost:8000/recordings?limit=20&offset=40"
 ```
 
-## Processing Pipeline
+**Example (Python):**
+```python
+import requests
 
-1. **Audio Upload**: File is saved to `uploads/` directory
-2. **Database Entry**: Record created in SQLite database
-3. **Background Job**: Processing starts asynchronously
-4. **Transcription**: Audio converted to text using Whisper
-5. **AI Processing**: LangGraph pipeline generates study materials:
-   - Node 1A: Structured class notes (GPT-4)
-   - Node 1B: Misconception detection (GPT-4-mini)
-   - Node 2: Practice questions (GPT-4-mini)
-   - Node 3: Resources & real-life applications (GPT-5)
-   - Node 4: Study plan & actions (Gemini-1.5-flash)
-6. **Result Storage**: Combined markdown saved to database
+# Get all recordings
+response = requests.get("http://localhost:8000/recordings")
+print(response.json())
 
-## Model Configuration
+# With filters
+params = {
+    "school_name": "Springfield High School",
+    "class": "10th Grade",
+    "limit": 20
+}
+response = requests.get("http://localhost:8000/recordings", params=params)
+print(response.json())
+```
 
-The system uses a multi-model approach:
+---
 
-- **NODE_1A** (Notes): `gpt-4o` (OpenAI)
-- **NODE_1B** (Misconceptions): `gpt-4o-mini` (OpenAI)
-- **NODE_2** (Practice): `gpt-4o-mini` (OpenAI)
-- **NODE_3** (Resources): `gpt-5` (OpenAI)
-- **NODE_4** (Actions): `gemini-1.5-flash` (Google Gemini)
+## 6. Get Recording by ID (Markdown)
+
+### GET `/recordings/{record_id}/markdown`
+
+Get a specific recording's result in markdown format by ID or filters.
+
+**Request:**
+```http
+GET /recordings/a1b2c3d4-e5f6-7890-abcd-ef1234567890/markdown HTTP/1.1
+Host: localhost:8000
+```
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| record_id | string | UUID of the recording (optional if using filters) |
+
+**Query Parameters (Optional):**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| school_name | string | Filter by school name |
+| class | string | Filter by class name |
+| section | string | Filter by section |
+| subject | string | Filter by subject |
+| recording_subject | string | Filter by recording subject |
+| date | string | Filter by date (YYYY-MM-DD) |
+
+**Response:**
+```markdown
+# Class Tutor – Combined Output
+
+[Full markdown content...]
+```
+
+**Status Codes:**
+- `200 OK`: Success
+- `404 Not Found`: Recording not found or result not available
+
+**Example (cURL):**
+```bash
+# By record_id
+curl "http://localhost:8000/recordings/a1b2c3d4-e5f6-7890-abcd-ef1234567890/markdown" \
+  -o recording.md
+
+# By record_id with additional filters
+curl "http://localhost:8000/recordings/a1b2c3d4/markdown?school_name=Springfield%20High%20School" \
+  -o recording.md
+```
+
+**Example (Python):**
+```python
+import requests
+
+# By record_id
+record_id = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+response = requests.get(f"http://localhost:8000/recordings/{record_id}/markdown")
+
+with open("recording.md", "w", encoding="utf-8") as f:
+    f.write(response.text)
+```
+
+---
+
+## 7. Get Recording by Filters (Markdown)
+
+### GET `/recordings/markdown`
+
+Get a recording's result in markdown format using only filters (no record_id).
+
+**Request:**
+```http
+GET /recordings/markdown?school_name=Springfield%20High%20School&class=10th%20Grade&date=2026-03-07 HTTP/1.1
+Host: localhost:8000
+```
+
+**Query Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| school_name | string | Filter by school name |
+| class | string | Filter by class name |
+| section | string | Filter by section |
+| subject | string | Filter by subject |
+| recording_subject | string | Filter by recording subject |
+| date | string | Filter by date (YYYY-MM-DD) |
+
+**Response:**
+```markdown
+# Class Tutor – Combined Output
+
+[Full markdown content...]
+```
+
+**Status Codes:**
+- `200 OK`: Success
+- `404 Not Found`: Recording not found
+
+**Example (cURL):**
+```bash
+curl "http://localhost:8000/recordings/markdown?school_name=Springfield%20High%20School&class=10th%20Grade&date=2026-03-07" \
+  -o recording.md
+```
+
+**Example (Python):**
+```python
+import requests
+
+params = {
+    "school_name": "Springfield High School",
+    "class": "10th Grade",
+    "date": "2026-03-07"
+}
+response = requests.get("http://localhost:8000/recordings/markdown", params=params)
+
+with open("recording.md", "w", encoding="utf-8") as f:
+    f.write(response.text)
+```
+
+---
+
+## 8. Delete Recording
+
+### DELETE `/recordings/{record_id}`
+
+Delete a specific recording by ID or filters.
+
+**Request:**
+```http
+DELETE /recordings/a1b2c3d4-e5f6-7890-abcd-ef1234567890 HTTP/1.1
+Host: localhost:8000
+```
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| record_id | string | UUID of the recording (can be "dummy" if using only filters) |
+
+**Query Parameters (Optional):**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| school_name | string | Filter by school name |
+| class | string | Filter by class name |
+| section | string | Filter by section |
+| subject | string | Filter by subject |
+| recording_subject | string | Filter by recording subject |
+| date | string | Filter by date (YYYY-MM-DD) |
+
+**Response:**
+```json
+{
+  "message": "Recording deleted successfully",
+  "record_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+}
+```
+
+**Status Codes:**
+- `200 OK`: Recording deleted successfully
+- `404 Not Found`: Recording not found
+
+**Example (cURL):**
+```bash
+# By record_id
+curl -X DELETE "http://localhost:8000/recordings/a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+
+# By filters
+curl -X DELETE "http://localhost:8000/recordings/dummy?school_name=Springfield%20High%20School&class=10th%20Grade&date=2026-03-07"
+```
+
+**Example (Python):**
+```python
+import requests
+
+# By record_id
+record_id = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+response = requests.delete(f"http://localhost:8000/recordings/{record_id}")
+print(response.json())
+
+# By filters
+params = {
+    "school_name": "Springfield High School",
+    "class": "10th Grade",
+    "date": "2026-03-07"
+}
+response = requests.delete("http://localhost:8000/recordings/dummy", params=params)
+print(response.json())
+```
+
+---
+
+## 9. Delete All Recordings
+
+### DELETE `/recordings`
+
+Delete all recordings from the database.
+
+**⚠️ WARNING:** This operation cannot be undone!
+
+**Request:**
+```http
+DELETE /recordings HTTP/1.1
+Host: localhost:8000
+```
+
+**Response:**
+```json
+{
+  "message": "Successfully deleted all recordings",
+  "deleted_count": 42
+}
+```
+
+**Status Codes:**
+- `200 OK`: All recordings deleted successfully
+
+**Example (cURL):**
+```bash
+curl -X DELETE "http://localhost:8000/recordings"
+```
+
+**Example (Python):**
+```python
+import requests
+
+response = requests.delete("http://localhost:8000/recordings")
+print(response.json())
+```
+
+---
+
+## 10. View Audit Logs
+
+### GET `/audit-logs`
+
+View complete audit trail of all activities performed on recordings.
+
+**Request:**
+```http
+GET /audit-logs?limit=10&offset=0&activity=CREATED HTTP/1.1
+Host: localhost:8000
+```
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| limit | integer | 100 | Maximum number of records to return |
+| offset | integer | 0 | Number of records to skip |
+| school_name | string | - | Filter by school name |
+| class | string | - | Filter by class name |
+| section | string | - | Filter by section |
+| subject | string | - | Filter by subject |
+| recording_subject | string | - | Filter by recording subject |
+| date | string | - | Filter by date (YYYY-MM-DD) |
+| activity | string | - | Filter by activity type |
+
+**Activity Types:**
+- `CREATED`: When a recording was created
+- `PROCESSED`: When audio processing completed
+- `DELETED`: When a recording was deleted
+- `DELETED_ALL`: When recordings were deleted in bulk
+
+**Response:**
+```json
+{
+  "logs": [
+    {
+      "id": "log-uuid-1",
+      "date": "2026-03-07",
+      "school_name": "Springfield High School",
+      "class": "10th Grade",
+      "section": "A",
+      "subject": "Physics",
+      "recording_subject": "Quantum Mechanics",
+      "audio_filename": "123e4567.mp3",
+      "job_id": "123e4567-e89b-12d3-a456-426614174000",
+      "activity": "CREATED",
+      "activity_timestamp": "2026-03-07T17:45:00",
+      "created_at": "2026-03-07T17:45:00"
+    },
+    {
+      "id": "log-uuid-2",
+      "date": "2026-03-07",
+      "school_name": "Springfield High School",
+      "class": "10th Grade",
+      "section": "A",
+      "subject": "Physics",
+      "recording_subject": "Quantum Mechanics",
+      "audio_filename": "123e4567.mp3",
+      "job_id": "123e4567-e89b-12d3-a456-426614174000",
+      "activity": "PROCESSED",
+      "activity_timestamp": "2026-03-07T17:50:00",
+      "created_at": "2026-03-07T17:45:00"
+    }
+  ],
+  "total": 2,
+  "limit": 10,
+  "offset": 0
+}
+```
+
+**Status Codes:**
+- `200 OK`: Success
+
+**Example (cURL):**
+```bash
+# Get all audit logs
+curl "http://localhost:8000/audit-logs"
+
+# Filter by activity type
+curl "http://localhost:8000/audit-logs?activity=CREATED"
+
+# Filter by school and date
+curl "http://localhost:8000/audit-logs?school_name=Springfield%20High%20School&date=2026-03-07"
+```
+
+**Example (Python):**
+```python
+import requests
+
+# Get all audit logs
+response = requests.get("http://localhost:8000/audit-logs")
+logs = response.json()["logs"]
+
+# Filter by activity
+params = {"activity": "CREATED", "limit": 50}
+response = requests.get("http://localhost:8000/audit-logs", params=params)
+
+for log in response.json()["logs"]:
+    print(f"{log['activity_timestamp']}: {log['activity']} - {log['school_name']}")
+```
+
+---
+
+## Error Responses
+
+All endpoints return error responses in the following format:
+
+```json
+{
+  "detail": "Error description here"
+}
+```
+
+### Common HTTP Status Codes
+
+| Code | Description |
+|------|-------------|
+| 200 | OK - Request successful |
+| 400 | Bad Request - Invalid parameters or request format |
+| 404 | Not Found - Resource not found |
+| 500 | Internal Server Error - Server error during processing |
+
+---
+
+## Interactive Documentation
+
+FastAPI provides automatic interactive API documentation:
+
+- **Swagger UI**: http://localhost:8000/docs
+- **ReDoc**: http://localhost:8000/redoc
+
+These interfaces allow you to:
+- View all endpoints and their parameters
+- Test API calls directly from the browser
+- See request/response schemas
+- Download OpenAPI specification
+
+---
 
 ## Complete Workflow Example
 
@@ -231,114 +778,109 @@ The system uses a multi-model approach:
 import requests
 import time
 
-# 1. Upload and process audio
-url = "http://localhost:8000/process"
-files = {"audio_file": open("lecture.mp3", "rb")}
-data = {
-    "class": "Physics",
-    "subject": "Quantum Mechanics",
-    "section": "B"
-}
+BASE_URL = "http://localhost:8000"
 
-response = requests.post(url, files=files, data=data)
-job_id = response.json()["job_id"]
-print(f"Job ID: {job_id}")
+# Step 1: Upload audio file
+print("Step 1: Uploading audio file...")
+with open("lecture.mp3", "rb") as audio_file:
+    files = {"audio_file": audio_file}
+    data = {
+        "school_name": "Springfield High School",
+        "class_name": "10th Grade",
+        "subject": "Physics",
+        "section": "A",
+        "recording_subject": "Quantum Mechanics"
+    }
+    
+    response = requests.post(f"{BASE_URL}/process", files=files, data=data)
+    result = response.json()
+    job_id = result["job_id"]
+    record_id = result["message"].split(": ")[1]
+    print(f"✓ Job ID: {job_id}")
+    print(f"✓ Record ID: {record_id}")
 
-# 2. Poll for status
+# Step 2: Poll for completion
+print("\nStep 2: Waiting for processing to complete...")
 while True:
-    status_response = requests.get(f"http://localhost:8000/status/{job_id}")
-    status = status_response.json()["status"]
-    print(f"Status: {status}")
+    response = requests.get(f"{BASE_URL}/status/{job_id}")
+    status_data = response.json()
+    status = status_data["status"]
+    
+    print(f"Status: {status} - {status_data.get('progress', '')}")
     
     if status == "completed":
+        print("✓ Processing completed!")
         break
     elif status == "failed":
-        print("Job failed:", status_response.json().get("error"))
-        break
+        print(f"✗ Failed: {status_data.get('error')}")
+        exit(1)
     
-    time.sleep(5)  # Wait 5 seconds before checking again
+    time.sleep(5)
 
-# 3. Get the result
-result_response = requests.get(f"http://localhost:8000/result/{job_id}")
-combined_md = result_response.json()["combined_md"]
+# Step 3: Download result
+print("\nStep 3: Downloading result...")
+response = requests.get(f"{BASE_URL}/result/{job_id}/markdown")
+with open("study_materials.md", "w", encoding="utf-8") as f:
+    f.write(response.text)
+print("✓ Saved to study_materials.md")
 
-# Save to file
-with open("study_materials.md", "w") as f:
-    f.write(combined_md)
+# Step 4: List recordings
+print("\nStep 4: Listing recordings...")
+response = requests.get(f"{BASE_URL}/recordings?limit=5")
+data = response.json()
+print(f"Total recordings: {data['total']}")
 
-print("Study materials saved to study_materials.md")
+# Step 5: View audit logs
+print("\nStep 5: Viewing audit logs...")
+response = requests.get(f"{BASE_URL}/audit-logs?limit=5")
+data = response.json()
+for log in data['logs']:
+    print(f"  {log['activity_timestamp']}: {log['activity']}")
+
+print("\n✓ Workflow completed successfully!")
 ```
 
-## Error Handling
+---
 
-All endpoints return appropriate HTTP status codes:
+## Best Practices
 
-- `200 OK`: Request successful
-- `400 Bad Request`: Invalid request parameters
-- `404 Not Found`: Job or resource not found
-- `500 Internal Server Error`: Server error during processing
+1. **Polling**: When checking job status, use exponential backoff or fixed intervals (5-10 seconds)
+2. **Error Handling**: Always check response status codes and handle errors appropriately
+3. **File Size**: Keep audio files under 100MB for optimal performance
+4. **Timeouts**: Set appropriate timeouts for long-running operations (5+ minutes)
+5. **Filters**: Use specific filters to reduce response size and improve performance
+6. **Pagination**: Use limit and offset for large result sets
+7. **Audit Logs**: Regularly review audit logs for compliance and monitoring
 
-Error responses include a detail message:
-```json
-{
-  "detail": "Error description here"
-}
+---
+
+## Rate Limiting (Recommended for Production)
+
+Implement rate limiting to prevent abuse:
+
+```python
+# Example rate limiting configuration
+RATE_LIMIT = "100/minute"  # 100 requests per minute per IP
 ```
 
-## Interactive API Documentation
+---
 
-FastAPI provides automatic interactive documentation:
+## CORS Configuration
 
-- **Swagger UI**: http://localhost:8000/docs
-- **ReDoc**: http://localhost:8000/redoc
+For production, configure CORS to allow only specific origins:
 
-## File Structure
-
-```
-/workspaces/class_recording/
-├── api.py                    # FastAPI application
-├── database.py               # SQLite operations
-├── models.py                 # Pydantic models
-├── worker.py                 # Background job processor
-├── class_test_graph.py       # LangGraph pipeline
-├── audio_to_transcribe_whisper.py  # Transcription
-├── recordings.db             # SQLite database
-├── uploads/                  # Uploaded audio files
-└── requirements.txt          # Python dependencies
+```python
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["https://yourdomain.com"],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "DELETE"],
+    allow_headers=["*"],
+)
 ```
 
-## Environment Variables
+---
 
-Required environment variables (set in `.env`):
-
-```
-OPENAI_API_KEY=your_openai_key
-GEMINI_API_KEY=your_gemini_key
-DEEPGRAM_API_KEY=your_deepgram_key
-LANGCHAIN_API_KEY=your_langchain_key
-LANGCHAIN_TRACING_V2=true
-LANGCHAIN_PROJECT=SMART_CLASS_NOTES
-```
-
-## Notes
-
-- The `uploads/` directory and `recordings.db` file are created automatically
-- Audio files are stored with UUID-based filenames for uniqueness
-- All LLM calls are tracked in LangSmith for monitoring
-- The system supports various audio formats (mp3, wav, m4a, etc.)
-- Processing time depends on audio length and model availability
-
-## Troubleshooting
-
-**Job stays in "pending" status:**
-- Check server logs for errors
-- Verify API keys are set correctly
-- Ensure models are accessible
-
-**"Job not found" error:**
-- Verify the job_id is correct
-- Jobs are stored in-memory and will be lost on server restart
-
-**Database errors:**
-- Ensure write permissions in the project directory
-- Check if `recordings.db` is locked by another process
+**Version**: 1.0.0  
+**Last Updated**: March 2026  
+**Status**: Production Ready ✅

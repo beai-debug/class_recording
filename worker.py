@@ -6,7 +6,7 @@ import traceback
 from pathlib import Path
 from typing import Dict, Any
 from audio_to_transcribe_whisper import transcribe_audio_to_text
-from class_test_graph import run_tutor_pipeline
+from class_graph import run_tutor_pipeline
 from database import update_combined_md
 
 

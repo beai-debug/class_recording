@@ -5,7 +5,7 @@ import uuid
 import shutil
 from pathlib import Path
 from typing import Optional, Annotated
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException, Query
 from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -14,13 +14,19 @@ from models import (
     JobStatusResponse,
     JobResultResponse,
     RecordingResponse,
-    RecordingsListResponse
+    RecordingsListResponse,
+    DeleteAllResponse,
+    AuditLogResponse,
+    AuditLogsListResponse
 )
 from database import (
     insert_recording,
     get_recording_by_job_id,
     get_all_recordings,
-    get_recording_by_id
+    get_recording_by_id,
+    delete_recording,
+    delete_all_recordings,
+    get_audit_logs
 )
 from worker import start_job, get_job_status
 
@@ -55,8 +61,11 @@ def root():
         "endpoints": {
             "POST /process": "Upload and process audio file",
             "GET /status/{job_id}": "Check job status",
-            "GET /result/{job_id}": "Get processing result",
-            "GET /recordings": "List all recordings"
+            "GET /result/{job_id}/markdown": "Get processing result in markdown",
+            "GET /recordings": "List all recordings with optional filters",
+            "GET /recordings/{record_id}/markdown": "Get recording markdown with optional filters",
+            "DELETE /recordings/{record_id}": "Delete a recording with optional filters",
+            "DELETE /recordings": "Delete all recordings"
         }
     }
 
@@ -64,9 +73,11 @@ def root():
 @app.post("/process", response_model=JobResponse)
 async def process_audio(
     audio_file: UploadFile = File(..., description="Audio file to process"),
-    subject: str = Form(..., description="Subject name"),
+    school_name: str = Form(..., description="School name"),
+    subject: Optional[str] = Form(None, description="Subject name (optional)"),
+    class_name: str = Form(..., description="Class/Grade (e.g., 10th, 12th)"),
     section: Optional[str] = Form(None, description="Section (optional)"),
-    class_name: str = Form(..., description="Class/Grade (e.g., 10th, 12th)")
+    recording_subject: Optional[str] = Form(None, description="Recording subject (optional)")
 ):
     """
     Upload and process an audio file.
@@ -99,11 +110,13 @@ async def process_audio(
         
         # Insert record into database
         record_id = insert_recording(
+            school_name=school_name,
             class_name=class_name,
             subject=subject,
             audio_filename=audio_filename,
             job_id=job_id,
-            section=section
+            section=section,
+            recording_subject=recording_subject
         )
         
         # Start background processing job
@@ -147,49 +160,6 @@ def get_status(job_id: str):
     )
 
 
-@app.get("/result/{job_id}", response_model=JobResultResponse)
-def get_result(job_id: str):
-    """
-    Get the result of a completed job.
-    
-    Returns:
-    - combined_md: The generated study materials in Markdown format
-    - status: Current job status
-    - error: Error message if job failed
-    """
-    # Check job status
-    job_status = get_job_status(job_id)
-    
-    if job_status["status"] == "not_found":
-        raise HTTPException(status_code=404, detail="Job not found")
-    
-    if job_status["status"] == "failed":
-        return JobResultResponse(
-            job_id=job_id,
-            status="failed",
-            error=job_status.get("error")
-        )
-    
-    if job_status["status"] in ["pending", "processing"]:
-        return JobResultResponse(
-            job_id=job_id,
-            status=job_status["status"],
-            combined_md=None
-        )
-    
-    # Job completed - get from database
-    recording = get_recording_by_job_id(job_id)
-    
-    if not recording:
-        raise HTTPException(status_code=404, detail="Recording not found in database")
-    
-    return JobResultResponse(
-        job_id=job_id,
-        status="completed",
-        combined_md=recording.get("combined_md")
-    )
-
-
 @app.get("/result/{job_id}/markdown", response_class=PlainTextResponse)
 def get_result_markdown(job_id: str):
     """
@@ -215,27 +185,53 @@ def get_result_markdown(job_id: str):
 
 
 @app.get("/recordings", response_model=RecordingsListResponse)
-def list_recordings(limit: int = 100, offset: int = 0):
+def list_recordings(
+    limit: int = Query(100, description="Maximum number of records to return"),
+    offset: int = Query(0, description="Number of records to skip"),
+    school_name: Optional[str] = Query(None, description="Filter by school name"),
+    class_name: Optional[str] = Query(None, description="Filter by class name", alias="class"),
+    section: Optional[str] = Query(None, description="Filter by section"),
+    subject: Optional[str] = Query(None, description="Filter by subject"),
+    recording_subject: Optional[str] = Query(None, description="Filter by recording subject"),
+    date: Optional[str] = Query(None, description="Filter by date (YYYY-MM-DD)")
+):
     """
-    List all recordings with pagination.
+    List all recordings with pagination and optional filters.
     
     Args:
         limit: Maximum number of records to return (default: 100)
         offset: Number of records to skip (default: 0)
+        school_name: Filter by school name (optional)
+        class_name: Filter by class name (optional)
+        section: Filter by section (optional)
+        subject: Filter by subject (optional)
+        recording_subject: Filter by recording subject (optional)
+        date: Filter by date in YYYY-MM-DD format (optional)
     """
-    recordings = get_all_recordings(limit=limit, offset=offset)
+    recordings = get_all_recordings(
+        limit=limit,
+        offset=offset,
+        school_name=school_name,
+        class_name=class_name,
+        section=section,
+        subject=subject,
+        recording_subject=recording_subject,
+        date=date
+    )
     
     # Convert to response model
     recording_responses = [
         RecordingResponse(
             id=rec["id"],
             date=rec["date"],
+            school_name=rec["school_name"],
             class_name=rec["class"],
             section=rec["section"],
             subject=rec["subject"],
+            recording_subject=rec["recording_subject"],
             audio_filename=rec["audio_filename"],
             job_id=rec["job_id"],
-            created_at=rec["created_at"]
+            created_at=str(rec["created_at"]) if rec.get("created_at") else None
         )
         for rec in recordings
     ]
@@ -248,17 +244,193 @@ def list_recordings(limit: int = 100, offset: int = 0):
     )
 
 
-@app.get("/recordings/{record_id}")
-def get_recording(record_id: int):
+@app.get("/recordings/{record_id}/markdown", response_class=PlainTextResponse)
+def get_recording_markdown(
+    record_id: Optional[str] = None,
+    school_name: Optional[str] = Query(None, description="Filter by school name"),
+    class_name: Optional[str] = Query(None, description="Filter by class name", alias="class"),
+    section: Optional[str] = Query(None, description="Filter by section"),
+    subject: Optional[str] = Query(None, description="Filter by subject"),
+    recording_subject: Optional[str] = Query(None, description="Filter by recording subject"),
+    date: Optional[str] = Query(None, description="Filter by date (YYYY-MM-DD)")
+):
     """
-    Get a specific recording by ID.
+    Get a specific recording in markdown format.
+    Can search by record_id or any combination of optional parameters.
+    record_id is now optional - you can search using any combination of filters.
     """
-    recording = get_recording_by_id(record_id)
+    recording = get_recording_by_id(
+        record_id=record_id,
+        school_name=school_name,
+        class_name=class_name,
+        section=section,
+        subject=subject,
+        recording_subject=recording_subject,
+        date=date
+    )
     
     if not recording:
         raise HTTPException(status_code=404, detail="Recording not found")
     
-    return recording
+    if not recording.get("combined_md"):
+        raise HTTPException(status_code=404, detail="Recording result not available yet")
+    
+    return recording["combined_md"]
+
+
+@app.get("/recordings/markdown", response_class=PlainTextResponse)
+def get_recording_markdown_without_id(
+    school_name: Optional[str] = Query(None, description="Filter by school name"),
+    class_name: Optional[str] = Query(None, description="Filter by class name", alias="class"),
+    section: Optional[str] = Query(None, description="Filter by section"),
+    subject: Optional[str] = Query(None, description="Filter by subject"),
+    recording_subject: Optional[str] = Query(None, description="Filter by recording subject"),
+    date: Optional[str] = Query(None, description="Filter by date (YYYY-MM-DD)")
+):
+    """
+    Get a specific recording in markdown format without record_id.
+    Search using any combination of optional parameters.
+    """
+    recording = get_recording_by_id(
+        record_id=None,
+        school_name=school_name,
+        class_name=class_name,
+        section=section,
+        subject=subject,
+        recording_subject=recording_subject,
+        date=date
+    )
+    
+    if not recording:
+        raise HTTPException(status_code=404, detail="Recording not found")
+    
+    if not recording.get("combined_md"):
+        raise HTTPException(status_code=404, detail="Recording result not available yet")
+    
+    return recording["combined_md"]
+
+
+@app.delete("/recordings/{record_id}")
+def delete_recording_endpoint(
+    record_id: Optional[str] = None,
+    school_name: Optional[str] = Query(None, description="Filter by school name"),
+    class_name: Optional[str] = Query(None, description="Filter by class name", alias="class"),
+    section: Optional[str] = Query(None, description="Filter by section"),
+    subject: Optional[str] = Query(None, description="Filter by subject"),
+    recording_subject: Optional[str] = Query(None, description="Filter by recording subject"),
+    date: Optional[str] = Query(None, description="Filter by date (YYYY-MM-DD)")
+):
+    """
+    Delete a specific recording.
+    Can search by record_id or any combination of optional parameters.
+    """
+    # First find the recording
+    recording = get_recording_by_id(
+        record_id=record_id,
+        school_name=school_name,
+        class_name=class_name,
+        section=section,
+        subject=subject,
+        recording_subject=recording_subject,
+        date=date
+    )
+    
+    if not recording:
+        raise HTTPException(status_code=404, detail="Recording not found")
+    
+    # Delete using the found record's ID
+    success = delete_recording(recording["id"])
+    
+    if not success:
+        raise HTTPException(status_code=404, detail="Recording not found")
+    
+    return {"message": "Recording deleted successfully", "record_id": recording["id"]}
+
+
+@app.delete("/recordings", response_model=DeleteAllResponse)
+def delete_all_recordings_endpoint():
+    """
+    Delete all recordings from the database.
+    
+    WARNING: This operation cannot be undone!
+    """
+    deleted_count = delete_all_recordings()
+    
+    return DeleteAllResponse(
+        message=f"Successfully deleted all recordings",
+        deleted_count=deleted_count
+    )
+
+
+@app.get("/audit-logs", response_model=AuditLogsListResponse)
+def list_audit_logs(
+    limit: int = Query(100, description="Maximum number of records to return"),
+    offset: int = Query(0, description="Number of records to skip"),
+    school_name: Optional[str] = Query(None, description="Filter by school name"),
+    class_name: Optional[str] = Query(None, description="Filter by class name", alias="class"),
+    section: Optional[str] = Query(None, description="Filter by section"),
+    subject: Optional[str] = Query(None, description="Filter by subject"),
+    recording_subject: Optional[str] = Query(None, description="Filter by recording subject"),
+    date: Optional[str] = Query(None, description="Filter by date (YYYY-MM-DD)"),
+    activity: Optional[str] = Query(None, description="Filter by activity type (CREATED, PROCESSED, DELETED, DELETED_ALL)")
+):
+    """
+    List all audit logs with pagination and optional filters.
+    
+    This endpoint shows the history of all activities performed on recordings:
+    - CREATED: When a recording was created
+    - PROCESSED: When audio processing completed
+    - DELETED: When a recording was deleted
+    - DELETED_ALL: When recordings were deleted in bulk
+    
+    Args:
+        limit: Maximum number of records to return (default: 100)
+        offset: Number of records to skip (default: 0)
+        school_name: Filter by school name (optional)
+        class_name: Filter by class name (optional)
+        section: Filter by section (optional)
+        subject: Filter by subject (optional)
+        recording_subject: Filter by recording subject (optional)
+        date: Filter by date in YYYY-MM-DD format (optional)
+        activity: Filter by activity type (optional)
+    """
+    logs = get_audit_logs(
+        limit=limit,
+        offset=offset,
+        school_name=school_name,
+        class_name=class_name,
+        section=section,
+        subject=subject,
+        recording_subject=recording_subject,
+        date=date,
+        activity=activity
+    )
+    
+    # Convert to response model
+    log_responses = [
+        AuditLogResponse(
+            id=log["id"],
+            date=log["date"],
+            school_name=log["school_name"],
+            class_name=log["class"],
+            section=log["section"],
+            subject=log["subject"],
+            recording_subject=log["recording_subject"],
+            audio_filename=log["audio_filename"],
+            job_id=log["job_id"],
+            activity=log["activity"],
+            activity_timestamp=str(log["activity_timestamp"]),
+            created_at=str(log["created_at"]) if log.get("created_at") else None
+        )
+        for log in logs
+    ]
+    
+    return AuditLogsListResponse(
+        logs=log_responses,
+        total=len(log_responses),
+        limit=limit,
+        offset=offset
+    )
 
 
 if __name__ == "__main__":

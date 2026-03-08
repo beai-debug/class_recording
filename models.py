@@ -8,9 +8,11 @@ from datetime import datetime
 
 class ProcessRequest(BaseModel):
     """Request model for processing audio files"""
+    school_name: str = Field(..., description="School name")
     class_name: str = Field(..., alias="class", description="Class name")
-    subject: str = Field(..., description="Subject name")
+    subject: Optional[str] = Field(None, description="Subject name (optional)")
     section: Optional[str] = Field(None, description="Section (optional)")
+    recording_subject: Optional[str] = Field(None, description="Recording subject (optional)")
 
     class Config:
         populate_by_name = True
@@ -41,11 +43,13 @@ class JobResultResponse(BaseModel):
 
 class RecordingResponse(BaseModel):
     """Response model for a single recording"""
-    id: int
+    id: str
     date: str
+    school_name: str
     class_name: str = Field(..., alias="class")
     section: Optional[str]
-    subject: str
+    subject: Optional[str]
+    recording_subject: Optional[str]
     audio_filename: str
     job_id: str
     created_at: str
@@ -57,6 +61,39 @@ class RecordingResponse(BaseModel):
 class RecordingsListResponse(BaseModel):
     """Response model for list of recordings"""
     recordings: list[RecordingResponse]
+    total: int
+    limit: int
+    offset: int
+
+
+class DeleteAllResponse(BaseModel):
+    """Response model for delete all operation"""
+    message: str
+    deleted_count: int
+
+
+class AuditLogResponse(BaseModel):
+    """Response model for a single audit log entry"""
+    id: str
+    date: str
+    school_name: str
+    class_name: str = Field(..., alias="class")
+    section: Optional[str]
+    subject: Optional[str]
+    recording_subject: Optional[str]
+    audio_filename: str
+    job_id: Optional[str]
+    activity: str
+    activity_timestamp: str
+    created_at: Optional[str]
+
+    class Config:
+        populate_by_name = True
+
+
+class AuditLogsListResponse(BaseModel):
+    """Response model for list of audit logs"""
+    logs: list[AuditLogResponse]
     total: int
     limit: int
     offset: int

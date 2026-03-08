@@ -7,7 +7,7 @@ from pathlib import Path
 # transcribe function you already have
 from audio_to_transcribe_whisper import transcribe_audio_to_text
 # the graph file you posted
-from class_test_graph import run_tutor_pipeline
+from class_graph import run_tutor_pipeline
 
 def main() -> int:
     if len(sys.argv) != 2:
